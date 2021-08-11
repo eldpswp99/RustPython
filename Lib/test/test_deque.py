@@ -205,7 +205,6 @@ class TestBasic(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _ = d.count(3)
 
-    @unittest.skip("TODO: RUSTPYTHON hangs")
     def test_extend(self):
         d = deque('a')
         self.assertRaises(TypeError, d.extend, 1)
@@ -236,8 +235,6 @@ class TestBasic(unittest.TestCase):
         with self.assertRaises(TypeError):
             deque('abc') + 'def'
 
-    # TODO: RUSTPYTHON
-    @unittest.expectedFailure
     def test_iadd(self):
         d = deque('a')
         d += 'bcd'
@@ -1010,7 +1007,6 @@ class TestSequence(seq_tests.CommonTest):
     def test_pickle(self):
         pass
         
-    @unittest.skip("TODO: RUSTPYTHON TypeError: '+=' not supported between instances of 'deque' and 'deque'")
     def test_iadd(self):
         pass
 

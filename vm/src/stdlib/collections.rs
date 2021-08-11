@@ -7,8 +7,8 @@ mod _collections {
     use crate::function::OptionalArg;
     use crate::slots::{Comparable, Hashable, Iterable, PyComparisonOp, PyIter, Unhashable};
     use crate::vm::ReprGuard;
-    use crate::VirtualMachine;
-    use crate::{sequence, sliceable};
+    use crate::{VirtualMachine, IntoPyRef, IntoPyObject};
+    use crate::{sequence, sliceable, IdProtocol, TryFromObject};
     use crate::{PyComparisonValue, PyIterable, PyObjectRef, PyRef, PyResult, PyValue, StaticType};
     use itertools::Itertools;
     use std::collections::VecDeque;
@@ -22,6 +22,7 @@ mod _collections {
         deque: PyRwLock<VecDeque<PyObjectRef>>,
         maxlen: AtomicCell<Option<usize>>,
     }
+
     type PyDequeRef = PyRef<PyDeque>;
 
     impl PyValue for PyDeque {
@@ -78,7 +79,7 @@ mod _collections {
                 maxlen: AtomicCell::new(maxlen),
             };
             if let OptionalArg::Present(iter) = iter {
-                py_deque.extend(iter, vm)?;
+                py_deque._extend(iter, vm)?;
             }
             py_deque.into_ref_with_type(vm, cls)
         }
@@ -125,13 +126,29 @@ mod _collections {
             Ok(count)
         }
 
-        #[pymethod]
-        fn extend(&self, iter: PyIterable, vm: &VirtualMachine) -> PyResult<()> {
-            // TODO: use length_hint here and for extendleft
+        fn _extend(&self, iter: PyIterable<PyObjectRef>, vm: &VirtualMachine) -> PyResult<()> {
             for elem in iter.iter(vm)? {
-                self.append(elem?);
+                self.append(elem?)
             }
+
             Ok(())
+        }
+
+        #[pymethod]
+        fn extend(zelf: PyRef<Self>, iter: PyObjectRef, vm: &VirtualMachine) -> PyResult<()> {
+            // TODO: use length_hint here and for extendleft
+            if zelf.is(&iter) {
+                let iter = PyIterable::try_from_object(vm, PyDeque::iter(zelf.copy().into_ref(vm), vm)?)?;
+                for elem in iter.iter(vm)?
+                {
+                    zelf.append(elem?)
+                }
+                Ok(())
+            } else {
+                let iter = PyIterable::try_from_object(vm, iter)?;
+
+                zelf._extend(iter, vm)
+            }
         }
 
         #[pymethod]
@@ -316,10 +333,26 @@ mod _collections {
                 maxlen: AtomicCell::new(self.maxlen.load()),
             }
         }
-
         #[pymethod(magic)]
         fn len(&self) -> usize {
             self.borrow_deque().len()
+        }
+
+        #[pymethod(magic)]
+        fn iadd(
+            zelf: PyRef<Self>,
+            other: PyObjectRef,
+            vm: &VirtualMachine,
+        ) -> PyResult<PyRef<Self>> {
+            let other: PyObjectRef = if zelf.is(&other) {
+                vm.new_pyobj(zelf.copy())
+            } else {
+                other
+            };
+            let other = PyIterable::try_from_object(vm, other)?;
+
+            zelf.extend(other, vm)?;
+            Ok(zelf)
         }
     }
 
@@ -348,7 +381,7 @@ mod _collections {
                 position: AtomicCell::new(0),
                 deque: zelf,
             }
-            .into_object(vm))
+                .into_object(vm))
         }
     }
 

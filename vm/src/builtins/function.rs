@@ -27,6 +27,7 @@ use itertools::Itertools;
 use rustpython_common::lock::OnceCell;
 #[cfg(feature = "jit")]
 use rustpython_jit::CompiledCode;
+use rustpython_vm::builtins::PyStr;
 
 pub type PyFunctionRef = PyRef<PyFunction>;
 
@@ -352,8 +353,15 @@ impl PyFunction {
     }
 
     #[pymethod(magic)]
-    fn repr(zelf: PyRef<Self>) -> String {
-        format!("<function {} at {:#x}>", zelf.name.lock(), zelf.get_id())
+    fn repr(zelf: PyRef<Self>, vm: &VirtualMachine) -> String {
+        let qualname = vm
+            .get_attribute(zelf.as_object().clone(), "__qualname__")
+            .ok()
+            .and_then(|qualname_attr| qualname_attr.downcast::<PyStr>().ok())
+            .map(|qualname| qualname.as_str().to_owned())
+            .unwrap_or_else(|| zelf.name().as_str().to_owned());
+
+        format!("<function {} at {:#x}>", qualname, zelf.get_id())
     }
 
     #[cfg(feature = "jit")]
@@ -481,6 +489,28 @@ impl PyBoundMethod {
     #[pyproperty(magic)]
     fn module(&self, vm: &VirtualMachine) -> Option<PyObjectRef> {
         vm.get_attribute(self.function.clone(), "__module__").ok()
+    }
+
+    #[pyproperty(magic)]
+    fn qualname(&self, vm: &VirtualMachine) -> PyResult {
+        if self
+            .function
+            .isinstance(&vm.ctx.types.builtin_function_or_method_type)
+        {
+            // Special case: we work with `__new__`, which is not really a method.
+            // It is a function, so its `__qualname__` is just `__new__`.
+            // We need to add object's part manually.
+            // Note: at the moment, `__new__` in the form of `tp_new_wrapper`
+            // is the only instance of `builtin_function_or_method_type`.
+            let obj_name = vm.get_attribute_opt(self.object.clone(), "__qualname__")?;
+            let obj_name: Option<PyStrRef> = obj_name.and_then(|o| o.downcast().ok());
+            return Ok(vm.ctx.new_str(format!(
+                "{}.__new__",
+                obj_name.as_ref().map_or("?", |s| s.as_str())
+            )));
+        }
+
+        vm.get_attribute(self.function.clone(), "__qualname__")
     }
 }
 
